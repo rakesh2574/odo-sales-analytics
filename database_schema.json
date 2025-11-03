@@ -1,0 +1,212 @@
+{
+  "database_name": "sales_order_system",
+  "tables": [
+    {
+      "table_name": "contact",
+      "description": "Customer and partner contacts",
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "primary_key": true,
+          "description": "Unique contact identifier"
+        },
+        {
+          "name": "name",
+          "type": "VARCHAR(255)",
+          "description": "Contact/Company name"
+        }
+      ]
+    },
+    {
+      "table_name": "sales_team",
+      "description": "Sales team information",
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "primary_key": true,
+          "description": "Unique sales team identifier"
+        },
+        {
+          "name": "name",
+          "type": "VARCHAR(255)",
+          "description": "Sales team name"
+        }
+      ]
+    },
+    {
+      "table_name": "user",
+      "description": "Salesperson user information",
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "primary_key": true,
+          "description": "Unique user identifier"
+        },
+        {
+          "name": "name",
+          "type": "VARCHAR(255)",
+          "description": "User/Salesperson name"
+        }
+      ]
+    },
+    {
+      "table_name": "product_variant",
+      "description": "Product catalog with variants",
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "primary_key": true,
+          "description": "Unique product identifier"
+        },
+        {
+          "name": "name",
+          "type": "VARCHAR(255)",
+          "description": "Product name with code"
+        }
+      ]
+    },
+    {
+      "table_name": "sale_order",
+      "description": "Sales order header information",
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "primary_key": true,
+          "description": "Unique order identifier"
+        },
+        {
+          "name": "name",
+          "type": "VARCHAR(50)",
+          "description": "Order reference number (e.g., S00001)"
+        },
+        {
+          "name": "date_order",
+          "type": "FLOAT",
+          "description": "Order date in Excel serial format"
+        },
+        {
+          "name": "partner_id",
+          "type": "INTEGER",
+          "foreign_key": "contact.id",
+          "description": "Customer contact ID"
+        },
+        {
+          "name": "team_id",
+          "type": "INTEGER",
+          "foreign_key": "sales_team.id",
+          "description": "Sales team ID"
+        },
+        {
+          "name": "user_id",
+          "type": "INTEGER",
+          "foreign_key": "user.id",
+          "description": "Salesperson user ID"
+        }
+      ],
+      "relationships": [
+        {
+          "type": "many-to-one",
+          "foreign_key": "partner_id",
+          "references": "contact.id"
+        },
+        {
+          "type": "many-to-one",
+          "foreign_key": "team_id",
+          "references": "sales_team.id"
+        },
+        {
+          "type": "many-to-one",
+          "foreign_key": "user_id",
+          "references": "user.id"
+        }
+      ]
+    },
+    {
+      "table_name": "sale_order_line",
+      "description": "Individual line items in sales orders",
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "primary_key": true,
+          "description": "Unique order line identifier"
+        },
+        {
+          "name": "order_id",
+          "type": "INTEGER",
+          "foreign_key": "sale_order.id",
+          "description": "Parent order ID"
+        },
+        {
+          "name": "order_partner_id",
+          "type": "INTEGER",
+          "foreign_key": "contact.id",
+          "description": "Customer from parent order"
+        },
+        {
+          "name": "product_id",
+          "type": "INTEGER",
+          "foreign_key": "product_variant.id",
+          "description": "Product variant ID"
+        },
+        {
+          "name": "product_uom_qty",
+          "type": "FLOAT",
+          "description": "Quantity ordered"
+        },
+        {
+          "name": "price_unit",
+          "type": "FLOAT",
+          "description": "Unit price"
+        },
+        {
+          "name": "price_subtotal",
+          "type": "FLOAT",
+          "description": "Subtotal before tax"
+        },
+        {
+          "name": "price_tax",
+          "type": "FLOAT",
+          "description": "Tax amount"
+        },
+        {
+          "name": "price_total",
+          "type": "FLOAT",
+          "description": "Total amount including tax"
+        }
+      ],
+      "relationships": [
+        {
+          "type": "many-to-one",
+          "foreign_key": "order_id",
+          "references": "sale_order.id"
+        },
+        {
+          "type": "many-to-one",
+          "foreign_key": "order_partner_id",
+          "references": "contact.id"
+        },
+        {
+          "type": "many-to-one",
+          "foreign_key": "product_id",
+          "references": "product_variant.id"
+        }
+      ]
+    }
+  ],
+  "sample_queries": [
+    "Show me all orders from LightsUp",
+    "What are the total sales by customer?",
+    "List top 5 products by revenue",
+    "Show orders created in the last 30 days",
+    "What is the average order value?",
+    "Which salesperson has the most orders?",
+    "Show me orders with more than 5 line items",
+    "What is the total revenue by sales team?"
+  ]
+}
