@@ -269,6 +269,30 @@ group by st.name
 order by total_revenue desc"""
         },
         {
+            "question": "Show sales by salesperson and their team",
+            "sql": """select 
+    st.name as team,
+    u.name as salesperson,
+    sum(sol.price_total) as total_sales
+from sale_order so
+join sales_team st on so.team_id = st.id
+join user u on so.user_id = u.id
+join sale_order_line sol on so.id = sol.order_id
+group by st.name, u.name
+order by total_sales desc"""
+        },
+        {
+            "question": "Which team has the highest free item ratio",
+            "sql": """select 
+    st.name as team,
+    sum(case when sol.price_unit = 0 then 1 else 0 end) * 1.0 / count(sol.id) as free_item_ratio
+from sales_team st
+join sale_order so on st.id = so.team_id
+join sale_order_line sol on so.id = sol.order_id
+group by st.id, st.name
+order by free_item_ratio desc"""
+        },
+        {
             "question": "Who are the top 10 customers by revenue?",
             "sql": """select c.name as customer, sum(sol.price_total) as total_revenue
 from sale_order_line sol
@@ -314,6 +338,8 @@ def create_enhanced_schema_prompt(schema: dict) -> str:
 
     # Add relationships
     prompt += "\n🔗 TABLE RELATIONSHIPS (use these for JOINs):\n"
+    prompt += "⚠️ CRITICAL: Follow these EXACT relationships:\n\n"
+
     for table in schema['tables']:
         if 'relationships' in table:
             for rel in table['relationships']:
@@ -321,6 +347,14 @@ def create_enhanced_schema_prompt(schema: dict) -> str:
                 ref = rel['references']
                 prompt += f"   • {table['table_name']}.{fk} = {ref}\n"
                 prompt += f"     JOIN: join {ref.split('.')[0]} on {table['table_name']}.{fk} = {ref}\n"
+
+    prompt += "\n⚠️ IMPORTANT NOTES:\n"
+    prompt += "   • ❌ WRONG: user and sales_team are NOT directly connected!\n"
+    prompt += "   • ❌ user table has NO team_id column\n"
+    prompt += "   • ❌ sales_team table has NO user_id column\n"
+    prompt += "   • ✅ CORRECT: Use sale_order as bridge table:\n"
+    prompt += "     Example: FROM sales_team st JOIN sale_order so ON st.id = so.team_id JOIN user u ON u.id = so.user_id\n"
+    prompt += "   • ✅ CORRECT: FROM user u JOIN sale_order so ON u.id = so.user_id JOIN sales_team st ON so.team_id = st.id\n"
 
     # Add examples
     prompt += "\n✅ EXAMPLE QUERIES (follow these patterns):\n"
