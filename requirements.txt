@@ -1,5 +1,26 @@
+# Sales Analytics Platform - Requirements
+# Updated: 2025-11-07
+
+# Core Dependencies
 streamlit
 pandas
 numpy
 openai
+
+# Database
+sqlite3  # Built-in with Python
+
+# Excel Support (for database creation if needed)
 openpyxl
+
+# Knowledge Graph Version
+networkx  # For graph-based schema modeling
+
+# Optional: For better performance
+# fastapi>=0.104.0  # If deploying as API
+# uvicorn>=0.24.0   # If deploying as API
+
+# Development Dependencies (optional)
+# pytest>=7.4.0
+# black>=23.0.0
+# flake8>=6.0.0

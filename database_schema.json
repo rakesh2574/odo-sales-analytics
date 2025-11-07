@@ -203,10 +203,12 @@
     "Show me all orders from LightsUp",
     "What are the total sales by customer?",
     "List top 5 products by revenue",
+    "List top 5 selling products by quantity in date range",
     "Show orders created in the last 30 days",
     "What is the average order value?",
     "Which salesperson has the most orders?",
     "Show me orders with more than 5 line items",
-    "What is the total revenue by sales team?"
+    "What is the total revenue by sales team?",
+    "For each customer, find their most purchased product"
   ]
 }
