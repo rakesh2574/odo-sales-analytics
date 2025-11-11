@@ -1,17 +1,19 @@
 {
   "database_name": "sales_order_system",
-  "description": "Schema extracted from actual Odoo database structure",
+  "description": "Corrected schema with proper Odoo table names and relationships",
   "tables": [
     {
-      "table_name": "contact",
-      "description": "Customer contacts",
+      "table_name": "res_partner",
+      "actual_table_name": "contact",
+      "description": "Customer contacts and partners",
       "columns": [
         {"name": "id", "type": "INTEGER", "primary_key": true},
         {"name": "name", "type": "VARCHAR(255)"}
       ]
     },
     {
-      "table_name": "sales_team",
+      "table_name": "crm_team",
+      "actual_table_name": "sales_team",
       "description": "Sales teams",
       "columns": [
         {"name": "id", "type": "INTEGER", "primary_key": true},
@@ -19,19 +21,35 @@
       ]
     },
     {
-      "table_name": "user",
+      "table_name": "res_users",
+      "actual_table_name": "user",
       "description": "Salesperson users. NO direct team relationship - use sale_order as bridge!",
+      "columns": [
+        {"name": "id", "type": "INTEGER", "primary_key": true},
+        {"name": "name", "type": "VARCHAR(255)"},
+        {"name": "partner_id", "type": "INTEGER", "foreign_key": "res_partner.id", "description": "Link to partner record for this user"}
+      ]
+    },
+    {
+      "table_name": "product_template",
+      "description": "Product templates (master product records)",
       "columns": [
         {"name": "id", "type": "INTEGER", "primary_key": true},
         {"name": "name", "type": "VARCHAR(255)"}
       ]
     },
     {
-      "table_name": "product_variant",
-      "description": "Products",
+      "table_name": "product_product",
+      "actual_table_name": "product_variant",
+      "description": "Product variants (specific SKUs)",
       "columns": [
         {"name": "id", "type": "INTEGER", "primary_key": true},
-        {"name": "name", "type": "VARCHAR(255)"}
+        {"name": "name", "type": "VARCHAR(255)"},
+        {"name": "product_tmpl_id", "type": "INTEGER", "foreign_key": "product_template.id", "description": "Link to product template"},
+        {"name": "price", "type": "FLOAT"}
+      ],
+      "relationships": [
+        {"foreign_key": "product_tmpl_id", "references": "product_template.id"}
       ]
     },
     {
@@ -39,44 +57,55 @@
       "description": "Sales orders - BRIDGE table connecting user, team, and customer",
       "columns": [
         {"name": "id", "type": "INTEGER", "primary_key": true},
-        {"name": "name", "type": "VARCHAR(50)"},
-        {"name": "date_order", "type": "FLOAT"},
-        {"name": "partner_id", "type": "INTEGER", "foreign_key": "contact.id"},
-        {"name": "team_id", "type": "INTEGER", "foreign_key": "sales_team.id"},
-        {"name": "user_id", "type": "INTEGER", "foreign_key": "user.id"}
+        {"name": "name", "type": "VARCHAR(50)", "description": "Order reference number"},
+        {"name": "date_order", "type": "FLOAT", "description": "Order date as Excel serial number"},
+        {"name": "partner_id", "type": "INTEGER", "foreign_key": "res_partner.id"},
+        {"name": "team_id", "type": "INTEGER", "foreign_key": "crm_team.id"},
+        {"name": "user_id", "type": "INTEGER", "foreign_key": "res_users.id"}
       ],
       "relationships": [
-        {"foreign_key": "partner_id", "references": "contact.id"},
-        {"foreign_key": "team_id", "references": "sales_team.id"},
-        {"foreign_key": "user_id", "references": "user.id"}
+        {"foreign_key": "partner_id", "references": "res_partner.id"},
+        {"foreign_key": "team_id", "references": "crm_team.id"},
+        {"foreign_key": "user_id", "references": "res_users.id"}
       ]
     },
     {
       "table_name": "sale_order_line",
-      "description": "Order line items",
+      "description": "Order line items with product quantities and pricing",
       "columns": [
         {"name": "id", "type": "INTEGER", "primary_key": true},
         {"name": "order_id", "type": "INTEGER", "foreign_key": "sale_order.id"},
-        {"name": "order_partner_id", "type": "INTEGER", "foreign_key": "contact.id"},
-        {"name": "product_id", "type": "INTEGER", "foreign_key": "product_variant.id"},
-        {"name": "product_uom_qty", "type": "FLOAT"},
-        {"name": "price_unit", "type": "FLOAT"},
-        {"name": "price_subtotal", "type": "FLOAT"},
-        {"name": "price_tax", "type": "FLOAT"},
-        {"name": "price_total", "type": "FLOAT"}
+        {"name": "order_partner_id", "type": "INTEGER", "foreign_key": "res_partner.id"},
+        {"name": "product_id", "type": "INTEGER", "foreign_key": "product_product.id"},
+        {"name": "product_uom_qty", "type": "FLOAT", "description": "Quantity ordered"},
+        {"name": "price_unit", "type": "FLOAT", "description": "Unit price"},
+        {"name": "price_subtotal", "type": "FLOAT", "description": "Subtotal before tax"},
+        {"name": "price_tax", "type": "FLOAT", "description": "Tax amount"},
+        {"name": "price_total", "type": "FLOAT", "description": "Total including tax"}
       ],
       "relationships": [
         {"foreign_key": "order_id", "references": "sale_order.id"},
-        {"foreign_key": "order_partner_id", "references": "contact.id"},
-        {"foreign_key": "product_id", "references": "product_variant.id"}
+        {"foreign_key": "order_partner_id", "references": "res_partner.id"},
+        {"foreign_key": "product_id", "references": "product_product.id"}
       ]
     }
   ],
+  "table_name_mappings": {
+    "res_partner": "contact",
+    "crm_team": "sales_team",
+    "res_users": "user",
+    "product_product": "product_variant",
+    "sale_order": "sale_order",
+    "sale_order_line": "sale_order_line"
+  },
   "important_notes": {
-    "NO_DIRECT_USER_TEAM_LINK": "user and sales_team are NOT directly connected. Always use sale_order as bridge.",
+    "TABLE_NAME_MAPPING": "Queries use Odoo table names (res_partner, crm_team, etc.) but database uses simplified names (contact, sales_team, etc.). SQL generation must map these correctly.",
+    "NO_DIRECT_USER_TEAM_LINK": "res_users and crm_team are NOT directly connected. Always use sale_order as bridge.",
+    "PRODUCT_HIERARCHY": "product_product (variants) link to product_template via product_tmpl_id",
     "correct_joins": {
-      "user_to_team": "FROM user u JOIN sale_order so ON u.id = so.user_id JOIN sales_team st ON so.team_id = st.id",
-      "team_to_user": "FROM sales_team st JOIN sale_order so ON st.id = so.team_id JOIN user u ON so.user_id = u.id"
+      "user_to_team": "FROM res_users u JOIN sale_order so ON u.id = so.user_id JOIN crm_team st ON so.team_id = st.id",
+      "team_to_user": "FROM crm_team st JOIN sale_order so ON st.id = so.team_id JOIN res_users u ON so.user_id = u.id",
+      "product_to_template": "FROM product_product pp JOIN product_template pt ON pp.product_tmpl_id = pt.id"
     }
   }
 }

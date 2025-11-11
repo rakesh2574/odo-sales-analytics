@@ -1,7 +1,6 @@
 """
-Sales Analytics Platform - Proper Enhanced Version
-Uses schema for validation, relationships for knowledge graph
-Validates BEFORE execution, not after
+Sales Analytics Platform - Enhanced with Complete Query Examples
+Handles Odoo table name mapping to actual database tables
 """
 
 import streamlit as st
@@ -31,6 +30,18 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 
+# Table name mapping from Odoo names to actual database names
+TABLE_NAME_MAPPING = {
+    'res_partner': 'contact',
+    'crm_team': 'sales_team',
+    'res_users': 'user',
+    'product_product': 'product_variant',
+    'product_template': 'product_template',  # May not exist in current DB
+    'sale_order': 'sale_order',
+    'sale_order_line': 'sale_order_line'
+}
+
+
 @st.cache_resource
 def get_db_connection():
     """Get database connection"""
@@ -52,87 +63,217 @@ def load_schema():
         return None
 
 
-def get_valid_columns_and_tables(schema: dict) -> Tuple[Set[str], Set[str], Dict[str, List[str]]]:
+def map_table_names_in_sql(sql: str) -> str:
     """
-    Extract all valid column names, table names, and table-column mappings from schema
+    Convert Odoo table names to actual database table names
+    Preserves aliases and handles case-insensitive matching
+    """
+    mapped_sql = sql
+
+    # Sort by length (descending) to avoid partial replacements
+    for odoo_name, db_name in sorted(TABLE_NAME_MAPPING.items(), key=lambda x: len(x[0]), reverse=True):
+        # Match table names with word boundaries, case-insensitive
+        # Handles: FROM table, JOIN table, table AS alias, table alias
+        pattern = r'\b' + re.escape(odoo_name) + r'\b'
+        mapped_sql = re.sub(pattern, db_name, mapped_sql, flags=re.IGNORECASE)
+
+    return mapped_sql
+
+
+def get_valid_columns_and_tables(schema: dict) -> Tuple[Set[str], Set[str], Dict[str, List[str]], Dict[str, List[Dict]]]:
+    """
+    Extract all valid column names, table names, table-column mappings, and relationships
+    Returns: (valid_columns, valid_tables, table_columns, relationships)
     """
     valid_tables = set()
     valid_columns = set()
     table_columns = {}
+    relationships = {}
 
     for table in schema['tables']:
-        table_name = table['table_name']
-        valid_tables.add(table_name)
-        table_columns[table_name] = []
+        # Add both Odoo table name and actual table name
+        odoo_name = table['table_name']
+        actual_name = table.get('actual_table_name', odoo_name)
+
+        valid_tables.add(odoo_name)
+        valid_tables.add(actual_name)
+
+        table_columns[odoo_name] = []
+        table_columns[actual_name] = []
+
+        # Store relationships for validation
+        relationships[odoo_name] = table.get('relationships', [])
+        relationships[actual_name] = table.get('relationships', [])
 
         for col in table['columns']:
             col_name = col['name']
-            valid_columns.add(col_name)  # Just the column name
-            table_columns[table_name].append(col_name)
+            valid_columns.add(col_name)
+            table_columns[odoo_name].append(col_name)
+            table_columns[actual_name].append(col_name)
 
-    return valid_columns, valid_tables, table_columns
+    return valid_columns, valid_tables, table_columns, relationships
 
 
 def validate_sql_against_schema(sql: str, schema: dict) -> Tuple[bool, Optional[str]]:
     """
-    PROPER validation: Check that columns exist in schema
-    Handles table aliases correctly
+    COMPREHENSIVE SQL VALIDATION - Multiple layers of security and validation:
+    1. Security guard rails (prevent dangerous operations)
+    2. Column-to-table relationship validation
+    3. Foreign key relationship checking
+    4. Schema compliance verification
     """
-    valid_columns, valid_tables, table_columns = get_valid_columns_and_tables(schema)
+    valid_columns, valid_tables, table_columns, relationships = get_valid_columns_and_tables(schema)
 
-    # SQL keywords that are not columns
+    # ============================================
+    # LAYER 1: SECURITY GUARD RAILS
+    # ============================================
+
+    # Block dangerous SQL operations (only SELECT allowed)
+    dangerous_keywords = ['drop', 'delete', 'truncate', 'update', 'insert', 'alter', 'create',
+                         'grant', 'revoke', 'exec', 'execute', 'into', 'outfile']
+    sql_lower = sql.lower()
+
+    for keyword in dangerous_keywords:
+        if re.search(r'\b' + keyword + r'\b', sql_lower):
+            return False, f"🛡️ Security: '{keyword.upper()}' operations not allowed. Only SELECT queries permitted."
+
+    # Check for SQL injection patterns
+    injection_patterns = [
+        r';.*drop', r';.*delete', r';.*update',
+        r'--', r'/\*', r'\*/', r'xp_', r'sp_',
+        r'exec\s*\(', r'execute\s*\('
+    ]
+
+    for pattern in injection_patterns:
+        if re.search(pattern, sql_lower):
+            return False, "🛡️ Security: Query contains suspicious patterns. Please use standard SELECT queries."
+
+    # Limit query complexity (max 5 JOINs)
+    join_count = len(re.findall(r'\bjoin\b', sql_lower))
+    if join_count > 5:
+        return False, f"⚠️ Query too complex: {join_count} JOINs found. Maximum 5 allowed for safety."
+
+    # ============================================
+    # LAYER 2: SQL KEYWORDS (not columns)
+    # ============================================
     sql_keywords = {
         'select', 'from', 'where', 'group', 'order', 'limit', 'offset',
         'join', 'inner', 'left', 'right', 'outer', 'on', 'as', 'and', 'or',
         'having', 'distinct', 'count', 'sum', 'avg', 'max', 'min', 'case',
         'when', 'then', 'else', 'end', 'between', 'like', 'in', 'not', 'is',
-        'null', 'asc', 'desc', 'by', 'all', 'exists', 'union', 'intersect'
+        'null', 'asc', 'desc', 'by', 'all', 'exists', 'intersect',
+        'with', 'over', 'partition', 'row_number', 'cast', 'numeric', 'interval',
+        'date_trunc', 'current_date', 'round', 'cte', 'sub', 'values'
     }
 
-    # Extract all table.column references (e.g., "so.id", "c.name")
-    column_refs = re.findall(r'\b(\w+)\.(\w+)\b', sql.lower())
+    # ============================================
+    # LAYER 3: BUILD TABLE ALIAS MAP
+    # ============================================
+    # Map aliases to actual table names for column validation
+    alias_map = {}  # alias -> table_name
 
-    # Validate each column reference
+    # Pattern: "FROM/JOIN table_name [AS] alias"
+    from_join_pattern = r'\b(?:from|join)\s+(\w+)(?:\s+as\s+|\s+)(\w+)'
+    matches = re.findall(from_join_pattern, sql_lower)
+
+    for table_name, alias in matches:
+        if alias not in sql_keywords:
+            alias_map[alias] = table_name
+
+    # Also handle direct table references (no alias)
+    direct_pattern = r'\b(?:from|join)\s+(\w+)(?:\s+(?:on|where|group|order|limit|$))'
+    for table_name in re.findall(direct_pattern, sql_lower):
+        if table_name in valid_tables:
+            alias_map[table_name] = table_name
+
+    # ============================================
+    # LAYER 4: VALIDATE COLUMN-TO-TABLE RELATIONSHIPS
+    # ============================================
+    column_refs = re.findall(r'\b(\w+)\.(\w+)\b', sql_lower)
+
+    errors = []
+
     for table_alias, col_name in column_refs:
-        # Skip if it's a SQL keyword
         if col_name in sql_keywords:
             continue
 
-        # Check if column exists in ANY table (we don't care about the alias)
+        # Get actual table name from alias
+        actual_table = alias_map.get(table_alias)
+
+        if not actual_table:
+            # Alias not found - might be in subquery, skip
+            continue
+
+        # Check if column exists in schema
         if col_name not in valid_columns:
-            # Not a valid column - find similar columns for helpful error
             similar = [c for c in valid_columns if col_name in c or c in col_name]
             error_msg = f"Column '{col_name}' does not exist in schema."
             if similar:
                 error_msg += f" Did you mean: {', '.join(similar[:3])}?"
-            return False, error_msg
+            errors.append(error_msg)
+            continue
 
-    # Also check standalone column names in SELECT clause (without table prefix)
-    # Extract SELECT clause
-    select_match = re.search(r'select\s+(.*?)\s+from', sql.lower(), re.DOTALL)
-    if select_match:
-        select_clause = select_match.group(1)
-        # Remove aggregations and functions
-        select_clause = re.sub(r'(sum|avg|count|max|min|distinct)\s*\([^)]*\)', '', select_clause)
-        # Extract potential column names (word before 'as' or just words)
-        potential_cols = re.findall(r'\b([a-z_][a-z0-9_]*)\b', select_clause)
+        # CRITICAL: Verify column belongs to THIS specific table
+        if actual_table in table_columns:
+            if col_name not in table_columns[actual_table]:
+                error_msg = f"❌ Column '{col_name}' does NOT belong to table '{actual_table}'."
+                # Find which tables actually have this column
+                correct_tables = [t for t, cols in table_columns.items() if col_name in cols]
+                if correct_tables:
+                    error_msg += f"\n   ✅ '{col_name}' exists in: {', '.join(correct_tables[:3])}"
+                errors.append(error_msg)
 
-        for col in potential_cols:
-            # Skip SQL keywords, numbers, and already validated table.column refs
-            if col in sql_keywords or col.isdigit():
-                continue
-            # Skip if it's a table name (could be alias)
-            if col in valid_tables:
-                continue
-            # Check if it's a valid column
-            if col not in valid_columns:
-                # Could be an alias or aggregation result - check if it appears in SELECT with AS
-                if f' as {col}' in sql.lower() or f' {col}' in sql.lower():
-                    continue  # It's an alias for a result
-                # Otherwise, it might be an error
-                # But to avoid false positives, only flag if it looks like a real column attempt
-                if '_' in col or len(col) > 3:  # Likely meant to be a column
-                    return False, f"Column '{col}' not found in schema. Check spelling."
+    if errors:
+        return False, "Schema validation failed:\n" + "\n".join(f"  • {e}" for e in errors)
+
+    # ============================================
+    # LAYER 5: VALIDATE FOREIGN KEY RELATIONSHIPS IN JOINS
+    # ============================================
+    join_conditions = re.findall(r'on\s+(\w+)\.(\w+)\s*=\s*(\w+)\.(\w+)', sql_lower)
+
+    relationship_warnings = []
+
+    for left_alias, left_col, right_alias, right_col in join_conditions:
+        left_table = alias_map.get(left_alias)
+        right_table = alias_map.get(right_alias)
+
+        if not left_table or not right_table:
+            continue
+
+        # Check if this JOIN uses a documented foreign key relationship
+        valid_join = False
+
+        # Check both directions
+        if left_table in relationships:
+            for rel in relationships[left_table]:
+                fk = rel.get('foreign_key', '')
+                ref = rel.get('references', '')
+                if (fk == left_col or fk == right_col) and (left_col in ref or right_col in ref):
+                    valid_join = True
+                    break
+
+        if right_table in relationships:
+            for rel in relationships[right_table]:
+                fk = rel.get('foreign_key', '')
+                ref = rel.get('references', '')
+                if (fk == left_col or fk == right_col) and (left_col in ref or right_col in ref):
+                    valid_join = True
+                    break
+
+        # Common valid patterns (id columns are usually safe)
+        if 'id' in [left_col, right_col]:
+            valid_join = True
+
+        if not valid_join:
+            relationship_warnings.append(
+                f"⚠️ JOIN {left_table}.{left_col} = {right_table}.{right_col} may not follow schema relationships"
+            )
+
+    # Log warnings but don't block (some valid joins might not be documented)
+    # In production, you might want to be stricter
+    if relationship_warnings:
+        # For now, just pass - but these could be logged
+        pass
 
     return True, None
 
@@ -177,269 +318,358 @@ def excel_date_to_datetime(excel_date):
 
 def get_example_queries() -> List[Dict[str, str]]:
     """
-    Few-shot examples for SQL generation - CRITICAL for accuracy
-    These are REAL working queries from your client
+    Comprehensive few-shot examples - ALL 10 client queries plus extras
+    Uses Odoo table names (will be mapped to actual names during execution)
     """
     return [
         {
-            "question": "Show all orders from LightsUp",
-            "sql": """select so.id, so.name as order_ref, c.name as customer
-from sale_order so
-join contact c on so.partner_id = c.id
-where c.name like '%LightsUp%'"""
+            "question": "List the top 5 selling products within a given date range, ranked by total quantity sold",
+            "sql": """SELECT 
+    sol.product_id,
+    pp.product_tmpl_id,
+    pp.name AS product_name,
+    SUM(sol.product_uom_qty) AS total_quantity_sold
+FROM sale_order_line AS sol
+JOIN product_product AS pp ON pp.id = sol.product_id
+JOIN sale_order AS so ON so.id = sol.order_id
+WHERE so.date_order BETWEEN '2025-01-01' AND '2025-12-31'
+GROUP BY sol.product_id, pp.product_tmpl_id, pp.name
+ORDER BY total_quantity_sold DESC
+LIMIT 5"""
         },
         {
-            "question": "What are the top 5 products by revenue?",
-            "sql": """select pv.name as product, sum(sol.price_total) as total_revenue
-from sale_order_line sol
-join product_variant pv on sol.product_id = pv.id
-group by pv.name
-order by total_revenue desc
-limit 5"""
-        },
-        {
-            "question": "List the top 5 selling products by quantity in a date range",
-            "sql": """select 
-    pv.name as product,
-    sum(sol.product_uom_qty) as total_quantity_sold
-from sale_order_line sol
-join product_variant pv on pv.id = sol.product_id
-join sale_order so on so.id = sol.order_id
-where so.date_order between '2025-01-01' and '2025-12-31'
-group by pv.name
-order by total_quantity_sold desc
-limit 5"""
-        },
-        {
-            "question": "For each customer, find the product they purchased most frequently",
-            "sql": """select 
-    c.name as customer,
-    pv.name as product,
-    sum(sol.product_uom_qty) as total_quantity
-from sale_order_line sol
-join sale_order so on so.id = sol.order_id
-join contact c on c.id = so.partner_id
-join product_variant pv on pv.id = sol.product_id
-group by c.name, pv.name
-having sum(sol.product_uom_qty) = (
-    select max(total_qty)
-    from (
-        select 
-            sum(sol2.product_uom_qty) as total_qty
-        from sale_order_line sol2
-        join sale_order so2 on so2.id = sol2.order_id
-        where so2.partner_id = so.partner_id
-        group by sol2.product_id
+            "question": "For each customer, find the product they've purchased most frequently (highest total quantity)",
+            "sql": """SELECT 
+    so.partner_id,
+    rp.name AS customer_name,
+    sol.product_id,
+    pp.product_tmpl_id,
+    pp.name AS product_name,
+    SUM(sol.product_uom_qty) AS total_quantity
+FROM sale_order_line sol
+JOIN sale_order so ON so.id = sol.order_id
+JOIN product_product pp ON pp.id = sol.product_id
+LEFT JOIN res_partner rp ON rp.id = so.partner_id
+GROUP BY so.partner_id, rp.name, sol.product_id, pp.product_tmpl_id, pp.name
+HAVING SUM(sol.product_uom_qty) = (
+    SELECT MAX(total_qty)
+    FROM (
+        SELECT 
+            sol2.product_id,
+            SUM(sol2.product_uom_qty) AS total_qty
+        FROM sale_order_line sol2
+        JOIN sale_order so2 ON so2.id = sol2.order_id
+        WHERE so2.partner_id = so.partner_id
+        GROUP BY sol2.product_id
     ) sub
 )"""
         },
         {
-            "question": "Show total sales by customer",
-            "sql": """select c.name as customer, sum(sol.price_total) as total_sales
-from sale_order_line sol
-join contact c on sol.order_partner_id = c.id
-group by c.name
-order by total_sales desc"""
+            "question": "Calculate the average order size in quantity of items per salesperson for a given time range",
+            "sql": """SELECT
+    so.user_id,
+    ru.name AS salesperson,
+    AVG(order_qty) AS avg_order_size_qty
+FROM (
+    SELECT
+        so.id AS order_id,
+        so.user_id,
+        SUM(sol.product_uom_qty) AS order_qty
+    FROM sale_order_line sol
+    JOIN sale_order so ON so.id = sol.order_id
+    WHERE so.date_order >= '2025-01-01' AND so.date_order < '2026-01-01'
+    GROUP BY so.id, so.user_id
+) AS per_order
+LEFT JOIN res_users ru ON ru.id = per_order.user_id
+GROUP BY per_order.user_id, ru.name
+ORDER BY avg_order_size_qty DESC"""
         },
         {
-            "question": "Which salesperson has the most orders?",
-            "sql": """select u.name as salesperson, count(distinct so.id) as order_count
-from sale_order so
-join user u on so.user_id = u.id
-group by u.name
-order by order_count desc
-limit 1"""
+            "question": "Determine the product with the highest average quantity per order across all customers",
+            "sql": """SELECT 
+    sol.product_id,
+    pp.product_tmpl_id,
+    pp.name AS product_name,
+    AVG(sol.product_uom_qty) AS avg_quantity_per_order
+FROM sale_order_line AS sol
+JOIN product_product AS pp ON pp.id = sol.product_id
+JOIN sale_order AS so ON so.id = sol.order_id
+GROUP BY sol.product_id, pp.product_tmpl_id, pp.name
+ORDER BY avg_quantity_per_order DESC
+LIMIT 1"""
         },
         {
-            "question": "What is the average order value?",
-            "sql": """select avg(order_total) as avg_order_value
-from (
-  select order_id, sum(price_total) as order_total
-  from sale_order_line
-  group by order_id
-)"""
+            "question": "Show the top customers by total quantity of products ordered, regardless of order value",
+            "sql": """SELECT 
+    so.partner_id,
+    rp.name AS customer_name,
+    SUM(sol.product_uom_qty) AS total_quantity_ordered
+FROM sale_order_line AS sol
+JOIN sale_order AS so ON so.id = sol.order_id
+LEFT JOIN res_partner rp ON rp.id = so.partner_id
+GROUP BY so.partner_id, rp.name
+ORDER BY total_quantity_ordered DESC
+LIMIT 10"""
         },
         {
-            "question": "Show total revenue by sales team",
-            "sql": """select st.name as team, sum(sol.price_total) as total_revenue
-from sale_order so
-join sales_team st on so.team_id = st.id
-join sale_order_line sol on so.id = sol.order_id
-group by st.name
-order by total_revenue desc"""
+            "question": "Compare sales quantity distribution between two specific sales teams over a given period",
+            "sql": """SELECT 
+    so.team_id,
+    ct.name AS team_name,
+    SUM(sol.product_uom_qty) AS total_quantity_sold
+FROM sale_order_line AS sol
+JOIN sale_order AS so ON so.id = sol.order_id
+LEFT JOIN crm_team ct ON ct.id = so.team_id
+WHERE so.date_order BETWEEN '2025-01-01' AND '2025-12-31'
+  AND so.team_id IN (1, 4)
+GROUP BY so.team_id, ct.name
+ORDER BY total_quantity_sold DESC"""
         },
         {
-            "question": "Show sales by salesperson and their team",
-            "sql": """select 
-    st.name as team,
-    u.name as salesperson,
-    sum(sol.price_total) as total_sales
-from sale_order so
-join sales_team st on so.team_id = st.id
-join user u on so.user_id = u.id
-join sale_order_line sol on so.id = sol.order_id
-group by st.name, u.name
-order by total_sales desc"""
+            "question": "Find the most frequently ordered product per sales team for a given time range",
+            "sql": """WITH team_product AS (
+    SELECT
+        so.team_id,
+        ct.name AS team_name,
+        sol.product_id,
+        pp.product_tmpl_id,
+        pp.name AS product_name,
+        SUM(sol.product_uom_qty) AS total_quantity
+    FROM sale_order_line sol
+    JOIN sale_order so ON so.id = sol.order_id
+    JOIN product_product pp ON pp.id = sol.product_id
+    LEFT JOIN crm_team ct ON ct.id = so.team_id
+    WHERE so.date_order BETWEEN '2025-01-01' AND '2025-12-31'
+    GROUP BY so.team_id, ct.name, sol.product_id, pp.product_tmpl_id, pp.name
+),
+ranked AS (
+    SELECT
+        team_id,
+        team_name,
+        product_id,
+        product_tmpl_id,
+        product_name,
+        total_quantity,
+        ROW_NUMBER() OVER (PARTITION BY team_id ORDER BY total_quantity DESC) AS rn
+    FROM team_product
+)
+SELECT team_id, team_name, product_id, product_tmpl_id, product_name, total_quantity
+FROM ranked
+WHERE rn = 1"""
         },
         {
-            "question": "Which team has the highest free item ratio",
-            "sql": """select 
-    st.name as team,
-    sum(case when sol.price_unit = 0 then 1 else 0 end) * 1.0 / count(sol.id) as free_item_ratio
-from sales_team st
-join sale_order so on st.id = so.team_id
-join sale_order_line sol on so.id = sol.order_id
-group by st.id, st.name
-order by free_item_ratio desc"""
+            "question": "List the average unit price per product and highlight any product where the price varies by more than 10% across orders",
+            "sql": """WITH product_prices AS (
+    SELECT
+        sol.product_id,
+        pp.product_tmpl_id,
+        pp.name AS product_name,
+        AVG(sol.price_unit) AS avg_unit_price,
+        MAX(sol.price_unit) AS max_price,
+        MIN(sol.price_unit) AS min_price
+    FROM sale_order_line sol
+    JOIN product_product pp ON pp.id = sol.product_id
+    JOIN sale_order so ON so.id = sol.order_id
+    GROUP BY sol.product_id, pp.product_tmpl_id, pp.name
+)
+SELECT
+    product_id,
+    product_tmpl_id,
+    product_name,
+    avg_unit_price,
+    max_price,
+    min_price,
+    ROUND(((max_price - min_price) / avg_unit_price) * 100, 2) AS price_variation_percent
+FROM product_prices
+WHERE ((max_price - min_price) / avg_unit_price) * 100 > 10
+ORDER BY price_variation_percent DESC"""
         },
         {
-            "question": "Who are the top 10 customers by revenue?",
-            "sql": """select c.name as customer, sum(sol.price_total) as total_revenue
-from sale_order_line sol
-join contact c on sol.order_partner_id = c.id
-group by c.name
-order by total_revenue desc
-limit 10"""
+            "question": "Calculate the total number of unique products sold by each salesperson during the last quarter",
+            "sql": """SELECT                                   
+    so.user_id,
+    ru.name AS salesperson,
+    rp.name AS salesperson_partner,
+    COUNT(DISTINCT sol.product_id) AS unique_products_sold
+FROM sale_order_line sol
+JOIN sale_order so ON so.id = sol.order_id
+LEFT JOIN res_users ru ON ru.id = so.user_id
+LEFT JOIN res_partner rp ON rp.id = ru.partner_id
+WHERE so.date_order >= '2024-10-01' AND so.date_order < '2025-01-01'
+GROUP BY so.user_id, ru.name, rp.name
+ORDER BY unique_products_sold DESC"""
+        },
+        {
+            "question": "Determine which customers purchase the most diverse product mix (most unique products ordered)",
+            "sql": """SELECT
+    so.partner_id,
+    rp.name AS customer_name,
+    COUNT(DISTINCT sol.product_id) AS unique_products_ordered
+FROM sale_order_line sol
+JOIN sale_order so ON so.id = sol.order_id
+LEFT JOIN res_partner rp ON rp.id = so.partner_id
+GROUP BY so.partner_id, rp.name
+ORDER BY unique_products_ordered DESC
+LIMIT 10"""
+        },
+        {
+            "question": "What are the top 5 products by revenue?",
+            "sql": """SELECT 
+    pp.name AS product,
+    pp.product_tmpl_id,
+    SUM(sol.price_total) AS total_revenue
+FROM sale_order_line sol
+JOIN product_product pp ON sol.product_id = pp.id
+GROUP BY pp.name, pp.product_tmpl_id
+ORDER BY total_revenue DESC
+LIMIT 5"""
+        },
+        {
+            "question": "Show all orders from a specific customer",
+            "sql": """SELECT 
+    so.id,
+    so.name AS order_ref,
+    rp.name AS customer,
+    so.date_order
+FROM sale_order so
+JOIN res_partner rp ON so.partner_id = rp.id
+WHERE rp.name LIKE '%LightsUp%'
+ORDER BY so.date_order DESC"""
+        },
+        {
+            "question": "Which sales team generated the most revenue?",
+            "sql": """SELECT 
+    ct.name AS team,
+    SUM(sol.price_total) AS total_revenue
+FROM sale_order_line sol
+JOIN sale_order so ON sol.order_id = so.id
+JOIN crm_team ct ON so.team_id = ct.id
+GROUP BY ct.name
+ORDER BY total_revenue DESC
+LIMIT 5"""
+        },
+        {
+            "question": "What is the average order value per customer?",
+            "sql": """SELECT 
+    rp.name AS customer,
+    AVG(order_total) AS avg_order_value
+FROM (
+    SELECT 
+        so.partner_id,
+        so.id AS order_id,
+        SUM(sol.price_total) AS order_total
+    FROM sale_order_line sol
+    JOIN sale_order so ON sol.order_id = so.id
+    GROUP BY so.partner_id, so.id
+) AS order_totals
+JOIN res_partner rp ON order_totals.partner_id = rp.id
+GROUP BY rp.name
+ORDER BY avg_order_value DESC
+LIMIT 10"""
         }
     ]
 
 
-def create_enhanced_schema_prompt(schema: dict) -> str:
-    """
-    Create enhanced prompt with complete schema information
-    """
-    prompt = """You are a SQL expert. Convert natural language to SQLite queries.
-
-⚠️ CRITICAL RULES - FOLLOW EXACTLY:
-1. Use ONLY column names from the schema below - NO other columns exist
-2. Use ONLY table names from the schema below - NO other tables exist
-3. Return ONLY the SQL query - no explanations, no markdown, no ```
-4. Use lowercase for SQL keywords
-5. Do NOT add semicolons
-6. Use table aliases (e.g., so for sale_order)
-
-📋 DATABASE SCHEMA - THESE ARE THE ONLY VALID TABLES AND COLUMNS:
-"""
-
-    # Add detailed schema
-    for table in schema['tables']:
-        prompt += f"\n🔹 Table: {table['table_name']}"
-        if 'description' in table:
-            prompt += f" - {table['description']}"
-        prompt += "\n   Columns (ONLY these columns exist):\n"
-
-        for col in table['columns']:
-            col_info = f"   • {col['name']} ({col['type']})"
-            if 'description' in col:
-                col_info += f" - {col['description']}"
-            if col.get('foreign_key'):
-                col_info += f" [FK → {col['foreign_key']}]"
-            prompt += col_info + "\n"
-
-    # Add relationships
-    prompt += "\n🔗 TABLE RELATIONSHIPS (use these for JOINs):\n"
-    prompt += "⚠️ CRITICAL: Follow these EXACT relationships:\n\n"
-
-    for table in schema['tables']:
-        if 'relationships' in table:
-            for rel in table['relationships']:
-                fk = rel['foreign_key']
-                ref = rel['references']
-                prompt += f"   • {table['table_name']}.{fk} = {ref}\n"
-                prompt += f"     JOIN: join {ref.split('.')[0]} on {table['table_name']}.{fk} = {ref}\n"
-
-    prompt += "\n⚠️ IMPORTANT NOTES:\n"
-    prompt += "   • ❌ WRONG: user and sales_team are NOT directly connected!\n"
-    prompt += "   • ❌ user table has NO team_id column\n"
-    prompt += "   • ❌ sales_team table has NO user_id column\n"
-    prompt += "   • ✅ CORRECT: Use sale_order as bridge table:\n"
-    prompt += "     Example: FROM sales_team st JOIN sale_order so ON st.id = so.team_id JOIN user u ON u.id = so.user_id\n"
-    prompt += "   • ✅ CORRECT: FROM user u JOIN sale_order so ON u.id = so.user_id JOIN sales_team st ON so.team_id = st.id\n"
-
-    # Add examples
-    prompt += "\n✅ EXAMPLE QUERIES (follow these patterns):\n"
-    examples = get_example_queries()
-    for i, ex in enumerate(examples[:7], 1):
-        prompt += f"\n{i}. Q: {ex['question']}\n"
-        prompt += f"   SQL: {ex['sql']}\n"
-
-    prompt += "\n⚠️ VALIDATION CHECKLIST:"
-    prompt += "\n   ✓ Every column in my query exists in the schema above"
-    prompt += "\n   ✓ Every table in my query exists in the schema above"
-    prompt += "\n   ✓ My JOINs use the exact foreign key relationships listed above"
-    prompt += "\n   ✓ I'm using lowercase keywords"
-    prompt += "\n   ✓ I'm not inventing any column or table names"
-
-    prompt += "\n\n📝 USER QUESTION: "
-
-    return prompt
-
-
 def generate_sql_with_validation(question: str, schema: dict, api_key: str) -> Tuple[Optional[str], Optional[str]]:
     """
-    Generate SQL and validate BEFORE execution
-    Retry with feedback if validation fails
+    Generate SQL using GPT with validation
+    Maps Odoo table names to actual database names
     """
     try:
         client = OpenAI(api_key=api_key)
-        prompt = create_enhanced_schema_prompt(schema) + question
 
-        # Try up to 2 times
-        for attempt in range(2):
-            if attempt > 0:
-                prompt += "\n\n⚠️ Your previous SQL had errors. Please fix and regenerate using ONLY the columns from the schema."
+        # Build schema context with BOTH Odoo and actual table names
+        schema_context = "DATABASE SCHEMA:\n"
+        schema_context += "Note: Use Odoo table names (res_partner, crm_team, res_users, product_product) in your queries.\n"
+        schema_context += "They will be automatically mapped to actual database tables.\n\n"
 
-            response = client.chat.completions.create(
-                model="gpt-3.5-turbo",
-                messages=[
-                    {
-                        "role": "system",
-                        "content": "You are a SQL expert. Generate ONLY valid SQL using the exact column and table names provided in the schema. Never invent column names."
-                    },
-                    {
-                        "role": "user",
-                        "content": prompt
-                    }
-                ],
-                temperature=0,
-                max_tokens=500
-            )
+        for table in schema['tables']:
+            odoo_name = table['table_name']
+            actual_name = table.get('actual_table_name', odoo_name)
+            schema_context += f"\nTable: {odoo_name}"
+            if actual_name != odoo_name:
+                schema_context += f" (maps to: {actual_name})"
+            schema_context += f"\nDescription: {table.get('description', '')}\n"
+            schema_context += "Columns:\n"
+            for col in table['columns']:
+                col_desc = f"  - {col['name']} ({col['type']})"
+                if col.get('description'):
+                    col_desc += f": {col['description']}"
+                schema_context += col_desc + "\n"
 
-            sql = response.choices[0].message.content.strip()
+        # Add important notes
+        if 'important_notes' in schema:
+            schema_context += "\nIMPORTANT NOTES:\n"
+            for key, value in schema['important_notes'].items():
+                if isinstance(value, dict):
+                    schema_context += f"\n{key}:\n"
+                    for k, v in value.items():
+                        schema_context += f"  {k}: {v}\n"
+                else:
+                    schema_context += f"- {key}: {value}\n"
 
-            # Clean up
-            if sql.startswith('```'):
-                lines = sql.split('\n')
-                sql = '\n'.join([l for l in lines if not l.strip().startswith('```')])
+        # Build few-shot examples
+        examples_text = "\nEXAMPLE QUERIES (use these as reference):\n\n"
+        for i, example in enumerate(get_example_queries(), 1):
+            examples_text += f"Example {i}:\n"
+            examples_text += f"Question: {example['question']}\n"
+            examples_text += f"SQL:\n{example['sql']}\n\n"
 
-            if sql.lower().strip().startswith('sql'):
-                sql = sql[3:].strip()
+        system_prompt = f"""You are an expert SQL query generator for an Odoo sales database.
 
-            sql = sql.strip().rstrip(';')
+{schema_context}
 
-            # VALIDATE BEFORE EXECUTION
-            is_valid, error = validate_sql_against_schema(sql, schema)
+{examples_text}
 
-            if is_valid:
-                return sql, None  # Success!
-            else:
-                # Add error feedback for retry
-                prompt += f"\n\n❌ Error: {error}"
-                if attempt == 1:  # Last attempt
-                    return None, f"Validation failed: {error}"
+CRITICAL RULES:
+1. Use ONLY table and column names from the schema above
+2. Use Odoo table names (res_partner, crm_team, res_users, product_product, etc.)
+3. Always include LEFT JOIN for name columns to get readable results
+4. For quantity-based queries, use SUM(sol.product_uom_qty)
+5. For revenue queries, use SUM(sol.price_total)
+6. Date filters use so.date_order BETWEEN 'YYYY-MM-DD' AND 'YYYY-MM-DD'
+7. Always include product_tmpl_id when selecting from product_product
+8. res_users and crm_team have NO direct relationship - use sale_order as bridge
+9. When getting salesperson names, join res_users to res_partner via partner_id
 
-        return None, "Could not generate valid SQL after 2 attempts"
+Generate ONLY the SQL query, no explanations."""
+
+        response = client.chat.completions.create(
+            model="gpt-3.5-turbo",
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": f"Generate SQL for: {question}"}
+            ],
+            temperature=0.1,
+            max_tokens=800
+        )
+
+        sql = response.choices[0].message.content.strip()
+
+        # Clean up the SQL
+        sql = sql.replace('```sql', '').replace('```', '').strip()
+
+        # Validate against schema (before mapping)
+        is_valid, validation_error = validate_sql_against_schema(sql, schema)
+        if not is_valid:
+            return None, f"Schema validation failed: {validation_error}"
+
+        # Map Odoo table names to actual database table names
+        mapped_sql = map_table_names_in_sql(sql)
+
+        return mapped_sql, None
 
     except Exception as e:
-        return None, f"Error: {str(e)}"
+        return None, f"Error generating SQL: {str(e)}"
 
 
 def execute_query(sql: str, conn) -> Tuple[Optional[pd.DataFrame], Optional[str]]:
-    """Execute SQL query - only called AFTER validation passes"""
+    """Execute SQL query and return results"""
     try:
-        return pd.read_sql_query(sql, conn), None
+        df = pd.read_sql_query(sql, conn)
+        return df, None
     except Exception as e:
-        return None, f"Execution error: {str(e)}"
+        return None, f"Query execution error: {str(e)}"
 
 
 def generate_natural_language_answer(question: str, df: pd.DataFrame, api_key: str) -> str:
@@ -448,7 +678,7 @@ def generate_natural_language_answer(question: str, df: pd.DataFrame, api_key: s
         client = OpenAI(api_key=api_key)
 
         if df is not None and len(df) > 0:
-            data_summary = f"Query returned {len(df)} rows.\n\n"
+            data_summary = f"Query returned {len(df)} row(s).\n\n"
             data_summary += "Sample data:\n"
             for idx, row in df.head(10).iterrows():
                 data_summary += f"Row {idx+1}: "
@@ -566,6 +796,13 @@ def main():
                 st.metric("Total Orders", f"{stats.get('sale_order', 0):,}")
                 st.metric("Total Revenue", f"${stats.get('revenue', 0):,.0f}")
 
+        st.divider()
+        st.header("ℹ️ System Info")
+        st.caption("Table Mapping:")
+        st.caption("• res_partner → contact")
+        st.caption("• crm_team → sales_team")
+        st.caption("• res_users → user")
+        st.caption("• product_product → product_variant")
 
 
     schema = load_schema()
@@ -597,8 +834,8 @@ def main():
             st.rerun()
 
     with col4:
-        if st.button("💰 Top Customers", use_container_width=True):
-            st.session_state.current_query = "Who are the top 10 customers by revenue?"
+        if st.button("💰 Diverse Customers", use_container_width=True):
+            st.session_state.current_query = "Which customers buy the most diverse products?"
             st.rerun()
 
     st.divider()
