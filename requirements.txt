@@ -8,7 +8,7 @@ numpy
 openai
 
 # Database
-sqlite3  # Built-in with Python
+# Built-in with Python
 
 # Excel Support (for database creation if needed)
 openpyxl
