@@ -316,6 +316,55 @@ def excel_date_to_datetime(excel_date):
         return None
 
 
+def datetime_to_excel_date(dt: datetime) -> float:
+    """Convert datetime to Excel serial date"""
+    delta = dt - datetime(1899, 12, 30)
+    return delta.days + delta.seconds / 86400.0
+
+
+def convert_dates_in_sql(sql: str) -> str:
+    """
+    Convert human-readable date strings in SQL to Excel serial numbers
+    Handles formats: 'YYYY-MM-DD', 'DD-MM-YYYY', 'MM/DD/YYYY'
+    """
+    # Pattern to match date strings in various formats
+    date_patterns = [
+        (r"'(\d{4})-(\d{1,2})-(\d{1,2})'", '%Y-%m-%d'),  # YYYY-MM-DD
+        (r"'(\d{1,2})-(\d{1,2})-(\d{4})'", '%d-%m-%Y'),  # DD-MM-YYYY (European)
+        (r"'(\d{1,2})/(\d{1,2})/(\d{4})'", '%m/%d/%Y'),  # MM/DD/YYYY (US)
+    ]
+
+    converted_sql = sql
+
+    for pattern, date_format in date_patterns:
+        matches = re.findall(pattern, converted_sql)
+        for match in matches:
+            try:
+                # Reconstruct the date string based on format
+                if date_format == '%Y-%m-%d':
+                    date_str = f"{match[0]}-{match[1]}-{match[2]}"
+                elif date_format == '%d-%m-%Y':
+                    date_str = f"{match[0]}-{match[1]}-{match[2]}"
+                elif date_format == '%m/%d/%Y':
+                    date_str = f"{match[0]}/{match[1]}/{match[2]}"
+
+                dt = datetime.strptime(date_str, date_format)
+                excel_date = datetime_to_excel_date(dt)
+
+                # Find and replace the original date string
+                if '-' in pattern:
+                    old_date = f"'{match[0]}-{match[1]}-{match[2]}'"
+                else:
+                    old_date = f"'{match[0]}/{match[1]}/{match[2]}'"
+
+                converted_sql = converted_sql.replace(old_date, str(excel_date), 1)
+            except ValueError:
+                # If parsing fails, leave it as is
+                continue
+
+    return converted_sql
+
+
 def get_example_queries() -> List[Dict[str, str]]:
     """
     Comprehensive few-shot examples - ALL 10 client queries plus extras
@@ -627,10 +676,13 @@ CRITICAL RULES:
 3. Always include LEFT JOIN for name columns to get readable results
 4. For quantity-based queries, use SUM(sol.product_uom_qty)
 5. For revenue queries, use SUM(sol.price_total)
-6. Date filters use so.date_order BETWEEN 'YYYY-MM-DD' AND 'YYYY-MM-DD'
+6. Date filters: Use so.date_order BETWEEN 'YYYY-MM-DD' AND 'YYYY-MM-DD' format
+   - Dates will be automatically converted to Excel serial numbers
+   - Accept DD-MM-YYYY or MM/DD/YYYY formats as well
 7. Always include product_tmpl_id when selecting from product_product
 8. res_users and crm_team have NO direct relationship - use sale_order as bridge
 9. When getting salesperson names, join res_users to res_partner via partner_id
+10. Queries are valid even if they return no results (empty dataset is OK)
 
 Generate ONLY the SQL query, no explanations."""
 
@@ -649,10 +701,13 @@ Generate ONLY the SQL query, no explanations."""
         # Clean up the SQL
         sql = sql.replace('```sql', '').replace('```', '').strip()
 
-        # Validate against schema (before mapping)
+        # Validate against schema (before mapping and date conversion)
         is_valid, validation_error = validate_sql_against_schema(sql, schema)
         if not is_valid:
             return None, f"Schema validation failed: {validation_error}"
+
+        # Convert date strings to Excel serial numbers
+        sql = convert_dates_in_sql(sql)
 
         # Map Odoo table names to actual database table names
         mapped_sql = map_table_names_in_sql(sql)
@@ -892,6 +947,10 @@ def main():
         st.subheader("💬 Answer")
         st.info(nl_answer)
 
+        # ALWAYS show SQL query (even when no data)
+        with st.expander("🔧 View SQL Query"):
+            st.code(sql, language='sql')
+
         if result_df is not None and len(result_df) > 0:
             st.divider()
             st.subheader("📋 Data")
@@ -906,11 +965,8 @@ def main():
                 f"results_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
                 "text/csv"
             )
-
-            with st.expander("🔧 View SQL Query"):
-                st.code(sql, language='sql')
         else:
-            st.info("ℹ️ No data found")
+            st.info("ℹ️ No data found for this query")
 
 
 if __name__ == "__main__":
