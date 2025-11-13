@@ -18,7 +18,8 @@ from typing import Dict, List, Optional, Tuple, Set
 logging.basicConfig(
     level=logging.ERROR,
     format='%(asctime)s - %(levelname)s - %(message)s',
-    filename='app_errors.log'
+    filename='app_errors.log',
+    encoding='utf-8'
 )
 
 # Page config
@@ -226,11 +227,11 @@ def validate_sql_against_schema(sql: str, schema: dict) -> Tuple[bool, Optional[
         # CRITICAL: Verify column belongs to THIS specific table
         if actual_table in table_columns:
             if col_name not in table_columns[actual_table]:
-                error_msg = f"❌ Column '{col_name}' does NOT belong to table '{actual_table}'."
+                error_msg = f"Column '{col_name}' does NOT belong to table '{actual_table}'."
                 # Find which tables actually have this column
                 correct_tables = [t for t, cols in table_columns.items() if col_name in cols]
                 if correct_tables:
-                    error_msg += f"\n   ✅ '{col_name}' exists in: {', '.join(correct_tables[:3])}"
+                    error_msg += f"\n   '{col_name}' exists in: {', '.join(correct_tables[:3])}"
                 errors.append(error_msg)
 
     if errors:
@@ -281,7 +282,7 @@ def validate_sql_against_schema(sql: str, schema: dict) -> Tuple[bool, Optional[
 
         if not valid_join:
             relationship_warnings.append(
-                f"⚠️ JOIN {left_table}.{left_col} = {right_table}.{right_col} may not follow schema relationships"
+                f"JOIN {left_table}.{left_col} = {right_table}.{right_col} may not follow schema relationships"
             )
 
     # Log warnings but don't block (some valid joins might not be documented)
@@ -469,7 +470,7 @@ CRITICAL RULES:
 9. When getting salesperson names, join res_users to res_partner via partner_id
 10. Queries are valid even if they return no results (empty dataset is OK)
 
-⚠️ CRITICAL SCHEMA WARNINGS:
+CRITICAL SCHEMA WARNINGS:
 - product_product table does NOT have 'name' column. Product name is ONLY in product_template.name
   ALWAYS JOIN: product_product.product_tmpl_id -> product_template.id -> product_template.name
 - res_users table does NOT have 'name' column. User name is ONLY in res_partner.name
