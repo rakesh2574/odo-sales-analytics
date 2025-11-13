@@ -6,12 +6,20 @@ Handles Odoo table name mapping to actual database tables
 import streamlit as st
 import pandas as pd
 import json
+import logging
 from datetime import datetime
 from openai import OpenAI
 import sqlite3
 import os
 import re
 from typing import Dict, List, Optional, Tuple, Set
+
+# Configure logging (for debugging - logs are not shown to users)
+logging.basicConfig(
+    level=logging.ERROR,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    filename='app_errors.log'
+)
 
 # Page config
 st.set_page_config(
@@ -59,7 +67,9 @@ def load_schema():
         with open('database_schema.json', 'r') as f:
             return json.load(f)
     except Exception as e:
-        st.error(f"Error loading schema: {e}")
+        import logging
+        logging.error(f"Error loading schema: {e}")
+        st.error("Unable to load system configuration. Please contact support.")
         return None
 
 
@@ -135,7 +145,7 @@ def validate_sql_against_schema(sql: str, schema: dict) -> Tuple[bool, Optional[
 
     for keyword in dangerous_keywords:
         if re.search(r'\b' + keyword + r'\b', sql_lower):
-            return False, f"🛡️ Security: '{keyword.upper()}' operations not allowed. Only SELECT queries permitted."
+            return False, "Sorry, I can only answer questions that retrieve information. Please rephrase your question."
 
     # Check for SQL injection patterns
     injection_patterns = [
@@ -146,12 +156,12 @@ def validate_sql_against_schema(sql: str, schema: dict) -> Tuple[bool, Optional[
 
     for pattern in injection_patterns:
         if re.search(pattern, sql_lower):
-            return False, "🛡️ Security: Query contains suspicious patterns. Please use standard SELECT queries."
+            return False, "I couldn't process that question. Please try a different question or select from the suggestions above."
 
     # Limit query complexity (max 5 JOINs)
     join_count = len(re.findall(r'\bjoin\b', sql_lower))
     if join_count > 5:
-        return False, f"⚠️ Query too complex: {join_count} JOINs found. Maximum 5 allowed for safety."
+        return False, "That question is too complex. Please try breaking it down into simpler questions."
 
     # ============================================
     # LAYER 2: SQL KEYWORDS (not columns)
@@ -224,7 +234,12 @@ def validate_sql_against_schema(sql: str, schema: dict) -> Tuple[bool, Optional[
                 errors.append(error_msg)
 
     if errors:
-        return False, "Schema validation failed:\n" + "\n".join(f"  • {e}" for e in errors)
+        # Log technical errors internally for debugging
+        import logging
+        logging.error(f"Schema validation errors: {errors}")
+
+        # User-friendly message - no technical details
+        return False, "I couldn't understand that question. Please try rephrasing or select one of the suggested questions above."
 
     # ============================================
     # LAYER 5: VALIDATE FOREIGN KEY RELATIONSHIPS IN JOINS
@@ -367,254 +382,24 @@ def convert_dates_in_sql(sql: str) -> str:
 
 def get_example_queries() -> List[Dict[str, str]]:
     """
-    Comprehensive few-shot examples - ALL 10 client queries plus extras
+    Single focused example for SQL generation
     Uses Odoo table names (will be mapped to actual names during execution)
     """
     return [
-        {
-            "question": "List the top 5 selling products within a given date range, ranked by total quantity sold",
-            "sql": """SELECT 
-    sol.product_id,
-    pp.product_tmpl_id,
-    pp.name AS product_name,
-    SUM(sol.product_uom_qty) AS total_quantity_sold
-FROM sale_order_line AS sol
-JOIN product_product AS pp ON pp.id = sol.product_id
-JOIN sale_order AS so ON so.id = sol.order_id
-WHERE so.date_order BETWEEN '2025-01-01' AND '2025-12-31'
-GROUP BY sol.product_id, pp.product_tmpl_id, pp.name
-ORDER BY total_quantity_sold DESC
-LIMIT 5"""
-        },
-        {
-            "question": "For each customer, find the product they've purchased most frequently (highest total quantity)",
-            "sql": """SELECT 
-    so.partner_id,
-    rp.name AS customer_name,
-    sol.product_id,
-    pp.product_tmpl_id,
-    pp.name AS product_name,
-    SUM(sol.product_uom_qty) AS total_quantity
-FROM sale_order_line sol
-JOIN sale_order so ON so.id = sol.order_id
-JOIN product_product pp ON pp.id = sol.product_id
-LEFT JOIN res_partner rp ON rp.id = so.partner_id
-GROUP BY so.partner_id, rp.name, sol.product_id, pp.product_tmpl_id, pp.name
-HAVING SUM(sol.product_uom_qty) = (
-    SELECT MAX(total_qty)
-    FROM (
-        SELECT 
-            sol2.product_id,
-            SUM(sol2.product_uom_qty) AS total_qty
-        FROM sale_order_line sol2
-        JOIN sale_order so2 ON so2.id = sol2.order_id
-        WHERE so2.partner_id = so.partner_id
-        GROUP BY sol2.product_id
-    ) sub
-)"""
-        },
-        {
-            "question": "Calculate the average order size in quantity of items per salesperson for a given time range",
-            "sql": """SELECT
-    so.user_id,
-    ru.name AS salesperson,
-    AVG(order_qty) AS avg_order_size_qty
-FROM (
-    SELECT
-        so.id AS order_id,
-        so.user_id,
-        SUM(sol.product_uom_qty) AS order_qty
-    FROM sale_order_line sol
-    JOIN sale_order so ON so.id = sol.order_id
-    WHERE so.date_order >= '2025-01-01' AND so.date_order < '2026-01-01'
-    GROUP BY so.id, so.user_id
-) AS per_order
-LEFT JOIN res_users ru ON ru.id = per_order.user_id
-GROUP BY per_order.user_id, ru.name
-ORDER BY avg_order_size_qty DESC"""
-        },
         {
             "question": "Determine the product with the highest average quantity per order across all customers",
             "sql": """SELECT 
     sol.product_id,
     pp.product_tmpl_id,
-    pp.name AS product_name,
+    pt.name AS product_name,
     AVG(sol.product_uom_qty) AS avg_quantity_per_order
 FROM sale_order_line AS sol
 JOIN product_product AS pp ON pp.id = sol.product_id
+JOIN product_template AS pt ON pt.id = pp.product_tmpl_id
 JOIN sale_order AS so ON so.id = sol.order_id
-GROUP BY sol.product_id, pp.product_tmpl_id, pp.name
+GROUP BY sol.product_id, pp.product_tmpl_id, pt.name
 ORDER BY avg_quantity_per_order DESC
 LIMIT 1"""
-        },
-        {
-            "question": "Show the top customers by total quantity of products ordered, regardless of order value",
-            "sql": """SELECT 
-    so.partner_id,
-    rp.name AS customer_name,
-    SUM(sol.product_uom_qty) AS total_quantity_ordered
-FROM sale_order_line AS sol
-JOIN sale_order AS so ON so.id = sol.order_id
-LEFT JOIN res_partner rp ON rp.id = so.partner_id
-GROUP BY so.partner_id, rp.name
-ORDER BY total_quantity_ordered DESC
-LIMIT 10"""
-        },
-        {
-            "question": "Compare sales quantity distribution between two specific sales teams over a given period",
-            "sql": """SELECT 
-    so.team_id,
-    ct.name AS team_name,
-    SUM(sol.product_uom_qty) AS total_quantity_sold
-FROM sale_order_line AS sol
-JOIN sale_order AS so ON so.id = sol.order_id
-LEFT JOIN crm_team ct ON ct.id = so.team_id
-WHERE so.date_order BETWEEN '2025-01-01' AND '2025-12-31'
-  AND so.team_id IN (1, 4)
-GROUP BY so.team_id, ct.name
-ORDER BY total_quantity_sold DESC"""
-        },
-        {
-            "question": "Find the most frequently ordered product per sales team for a given time range",
-            "sql": """WITH team_product AS (
-    SELECT
-        so.team_id,
-        ct.name AS team_name,
-        sol.product_id,
-        pp.product_tmpl_id,
-        pp.name AS product_name,
-        SUM(sol.product_uom_qty) AS total_quantity
-    FROM sale_order_line sol
-    JOIN sale_order so ON so.id = sol.order_id
-    JOIN product_product pp ON pp.id = sol.product_id
-    LEFT JOIN crm_team ct ON ct.id = so.team_id
-    WHERE so.date_order BETWEEN '2025-01-01' AND '2025-12-31'
-    GROUP BY so.team_id, ct.name, sol.product_id, pp.product_tmpl_id, pp.name
-),
-ranked AS (
-    SELECT
-        team_id,
-        team_name,
-        product_id,
-        product_tmpl_id,
-        product_name,
-        total_quantity,
-        ROW_NUMBER() OVER (PARTITION BY team_id ORDER BY total_quantity DESC) AS rn
-    FROM team_product
-)
-SELECT team_id, team_name, product_id, product_tmpl_id, product_name, total_quantity
-FROM ranked
-WHERE rn = 1"""
-        },
-        {
-            "question": "List the average unit price per product and highlight any product where the price varies by more than 10% across orders",
-            "sql": """WITH product_prices AS (
-    SELECT
-        sol.product_id,
-        pp.product_tmpl_id,
-        pp.name AS product_name,
-        AVG(sol.price_unit) AS avg_unit_price,
-        MAX(sol.price_unit) AS max_price,
-        MIN(sol.price_unit) AS min_price
-    FROM sale_order_line sol
-    JOIN product_product pp ON pp.id = sol.product_id
-    JOIN sale_order so ON so.id = sol.order_id
-    GROUP BY sol.product_id, pp.product_tmpl_id, pp.name
-)
-SELECT
-    product_id,
-    product_tmpl_id,
-    product_name,
-    avg_unit_price,
-    max_price,
-    min_price,
-    ROUND(((max_price - min_price) / avg_unit_price) * 100, 2) AS price_variation_percent
-FROM product_prices
-WHERE ((max_price - min_price) / avg_unit_price) * 100 > 10
-ORDER BY price_variation_percent DESC"""
-        },
-        {
-            "question": "Calculate the total number of unique products sold by each salesperson during the last quarter",
-            "sql": """SELECT                                   
-    so.user_id,
-    ru.name AS salesperson,
-    rp.name AS salesperson_partner,
-    COUNT(DISTINCT sol.product_id) AS unique_products_sold
-FROM sale_order_line sol
-JOIN sale_order so ON so.id = sol.order_id
-LEFT JOIN res_users ru ON ru.id = so.user_id
-LEFT JOIN res_partner rp ON rp.id = ru.partner_id
-WHERE so.date_order >= '2024-10-01' AND so.date_order < '2025-01-01'
-GROUP BY so.user_id, ru.name, rp.name
-ORDER BY unique_products_sold DESC"""
-        },
-        {
-            "question": "Determine which customers purchase the most diverse product mix (most unique products ordered)",
-            "sql": """SELECT
-    so.partner_id,
-    rp.name AS customer_name,
-    COUNT(DISTINCT sol.product_id) AS unique_products_ordered
-FROM sale_order_line sol
-JOIN sale_order so ON so.id = sol.order_id
-LEFT JOIN res_partner rp ON rp.id = so.partner_id
-GROUP BY so.partner_id, rp.name
-ORDER BY unique_products_ordered DESC
-LIMIT 10"""
-        },
-        {
-            "question": "What are the top 5 products by revenue?",
-            "sql": """SELECT 
-    pp.name AS product,
-    pp.product_tmpl_id,
-    SUM(sol.price_total) AS total_revenue
-FROM sale_order_line sol
-JOIN product_product pp ON sol.product_id = pp.id
-GROUP BY pp.name, pp.product_tmpl_id
-ORDER BY total_revenue DESC
-LIMIT 5"""
-        },
-        {
-            "question": "Show all orders from a specific customer",
-            "sql": """SELECT 
-    so.id,
-    so.name AS order_ref,
-    rp.name AS customer,
-    so.date_order
-FROM sale_order so
-JOIN res_partner rp ON so.partner_id = rp.id
-WHERE rp.name LIKE '%LightsUp%'
-ORDER BY so.date_order DESC"""
-        },
-        {
-            "question": "Which sales team generated the most revenue?",
-            "sql": """SELECT 
-    ct.name AS team,
-    SUM(sol.price_total) AS total_revenue
-FROM sale_order_line sol
-JOIN sale_order so ON sol.order_id = so.id
-JOIN crm_team ct ON so.team_id = ct.id
-GROUP BY ct.name
-ORDER BY total_revenue DESC
-LIMIT 5"""
-        },
-        {
-            "question": "What is the average order value per customer?",
-            "sql": """SELECT 
-    rp.name AS customer,
-    AVG(order_total) AS avg_order_value
-FROM (
-    SELECT 
-        so.partner_id,
-        so.id AS order_id,
-        SUM(sol.price_total) AS order_total
-    FROM sale_order_line sol
-    JOIN sale_order so ON sol.order_id = so.id
-    GROUP BY so.partner_id, so.id
-) AS order_totals
-JOIN res_partner rp ON order_totals.partner_id = rp.id
-GROUP BY rp.name
-ORDER BY avg_order_value DESC
-LIMIT 10"""
         }
     ]
 
@@ -657,10 +442,10 @@ def generate_sql_with_validation(question: str, schema: dict, api_key: str) -> T
                 else:
                     schema_context += f"- {key}: {value}\n"
 
-        # Build few-shot examples
-        examples_text = "\nEXAMPLE QUERIES (use these as reference):\n\n"
+        # Build few-shot example
+        examples_text = "\nEXAMPLE QUERY (use this as reference):\n\n"
         for i, example in enumerate(get_example_queries(), 1):
-            examples_text += f"Example {i}:\n"
+            examples_text += f"Example:\n"
             examples_text += f"Question: {example['question']}\n"
             examples_text += f"SQL:\n{example['sql']}\n\n"
 
@@ -684,10 +469,18 @@ CRITICAL RULES:
 9. When getting salesperson names, join res_users to res_partner via partner_id
 10. Queries are valid even if they return no results (empty dataset is OK)
 
+⚠️ CRITICAL SCHEMA WARNINGS:
+- product_product table does NOT have 'name' column. Product name is ONLY in product_template.name
+  ALWAYS JOIN: product_product.product_tmpl_id -> product_template.id -> product_template.name
+- res_users table does NOT have 'name' column. User name is ONLY in res_partner.name
+  ALWAYS JOIN: res_users.partner_id -> res_partner.id -> res_partner.name
+- NEVER use pp.name - use pt.name (after joining product_template)
+- NEVER use ru.name - use rp.name (after joining res_partner)
+
 Generate ONLY the SQL query, no explanations."""
 
         response = client.chat.completions.create(
-            model="gpt-3.5-turbo",
+            model="gpt-4o-mini",  # Using GPT-4o-mini for cost-effective SQL generation
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": f"Generate SQL for: {question}"}
@@ -704,7 +497,7 @@ Generate ONLY the SQL query, no explanations."""
         # Validate against schema (before mapping and date conversion)
         is_valid, validation_error = validate_sql_against_schema(sql, schema)
         if not is_valid:
-            return None, f"Schema validation failed: {validation_error}"
+            return None, validation_error  # Return the user-friendly message directly
 
         # Convert date strings to Excel serial numbers
         sql = convert_dates_in_sql(sql)
@@ -715,7 +508,9 @@ Generate ONLY the SQL query, no explanations."""
         return mapped_sql, None
 
     except Exception as e:
-        return None, f"Error generating SQL: {str(e)}"
+        import logging
+        logging.error(f"Error generating SQL: {str(e)}")
+        return None, "I couldn't process that question. Please try rephrasing or select from the suggested questions."
 
 
 def execute_query(sql: str, conn) -> Tuple[Optional[pd.DataFrame], Optional[str]]:
@@ -724,7 +519,9 @@ def execute_query(sql: str, conn) -> Tuple[Optional[pd.DataFrame], Optional[str]
         df = pd.read_sql_query(sql, conn)
         return df, None
     except Exception as e:
-        return None, f"Query execution error: {str(e)}"
+        import logging
+        logging.error(f"Query execution error: {str(e)}")
+        return None, "Unable to retrieve the data. Please try a different question."
 
 
 def generate_natural_language_answer(question: str, df: pd.DataFrame, api_key: str) -> str:
@@ -761,7 +558,7 @@ Data:
 Provide a clear answer in 2-3 sentences. Use natural language. Format numbers with $ and commas where appropriate."""
 
         response = client.chat.completions.create(
-            model="gpt-3.5-turbo",
+            model="gpt-4o-mini",  # Using GPT-4o-mini for better quality answers
             messages=[
                 {"role": "system", "content": "You are a business analyst who explains data clearly."},
                 {"role": "user", "content": prompt}
@@ -839,6 +636,13 @@ def main():
     with st.sidebar:
         st.header("⚙️ Configuration")
         api_key = st.text_input("OpenAI API Key", type="password", help="Enter your OpenAI API key")
+
+        # Debug mode for developers only
+        with st.expander("🔧 Developer Settings"):
+            debug_mode = st.checkbox("Debug Mode", value=False, help="Show technical error details")
+            if 'debug_mode' not in st.session_state:
+                st.session_state.debug_mode = False
+            st.session_state.debug_mode = debug_mode
 
         st.divider()
         st.header("📊 Database Overview")
@@ -926,8 +730,9 @@ def main():
 
         if error:
             st.error(f"❌ {error}")
-            with st.expander("🔍 View SQL"):
-                st.code(sql, language='sql')
+            if st.session_state.get('debug_mode', False):
+                with st.expander("🔍 View SQL (Debug Mode)"):
+                    st.code(sql, language='sql')
             return
 
         # Generate answer
