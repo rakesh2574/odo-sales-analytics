@@ -1,111 +1,493 @@
 {
   "database_name": "sales_order_system",
-  "description": "Corrected schema with proper Odoo table names and relationships",
+  "version": "1.0",
+  "description": "Complete sales order management system schema based on Odoo models",
+
   "tables": [
     {
-      "table_name": "res_partner",
-      "actual_table_name": "contact",
-      "description": "Customer contacts and partners",
-      "columns": [
-        {"name": "id", "type": "INTEGER", "primary_key": true},
-        {"name": "name", "type": "VARCHAR(255)"}
-      ]
-    },
-    {
-      "table_name": "crm_team",
-      "actual_table_name": "sales_team",
-      "description": "Sales teams",
-      "columns": [
-        {"name": "id", "type": "INTEGER", "primary_key": true},
-        {"name": "name", "type": "VARCHAR(255)"}
-      ]
-    },
-    {
-      "table_name": "res_users",
-      "actual_table_name": "user",
-      "description": "Salesperson users. NO direct team relationship - use sale_order as bridge!",
-      "columns": [
-        {"name": "id", "type": "INTEGER", "primary_key": true},
-        {"name": "name", "type": "VARCHAR(255)"},
-        {"name": "partner_id", "type": "INTEGER", "foreign_key": "res_partner.id", "description": "Link to partner record for this user"}
-      ]
-    },
-    {
-      "table_name": "product_template",
-      "description": "Product templates (master product records)",
-      "columns": [
-        {"name": "id", "type": "INTEGER", "primary_key": true},
-        {"name": "name", "type": "VARCHAR(255)"}
-      ]
-    },
-    {
-      "table_name": "product_product",
-      "actual_table_name": "product_variant",
-      "description": "Product variants (specific SKUs)",
-      "columns": [
-        {"name": "id", "type": "INTEGER", "primary_key": true},
-        {"name": "name", "type": "VARCHAR(255)"},
-        {"name": "product_tmpl_id", "type": "INTEGER", "foreign_key": "product_template.id", "description": "Link to product template"},
-        {"name": "price", "type": "FLOAT"}
-      ],
-      "relationships": [
-        {"foreign_key": "product_tmpl_id", "references": "product_template.id"}
-      ]
-    },
-    {
       "table_name": "sale_order",
-      "description": "Sales orders - BRIDGE table connecting user, team, and customer",
+      "actual_table_name": "sale_order",
+      "display_name": "Sale Order",
+      "description": "Sale Order Details",
+
       "columns": [
-        {"name": "id", "type": "INTEGER", "primary_key": true},
-        {"name": "name", "type": "VARCHAR(50)", "description": "Order reference number"},
-        {"name": "date_order", "type": "FLOAT", "description": "Order date as Excel serial number"},
-        {"name": "partner_id", "type": "INTEGER", "foreign_key": "res_partner.id"},
-        {"name": "team_id", "type": "INTEGER", "foreign_key": "crm_team.id"},
-        {"name": "user_id", "type": "INTEGER", "foreign_key": "res_users.id"}
+        {
+          "name": "date_order",
+          "type": "DATETIME",
+          "field_type": "datetime",
+          "nullable": true,
+          "description": "This is the sale order confirmation date.",
+          "example_values": "2025-11-13 21:38:35"
+        },
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "field_type": "integer",
+          "primary_key": true,
+          "nullable": false,
+          "description": "Primary key",
+          "example_values": "1,2,3,..."
+        },
+        {
+          "name": "name",
+          "type": "VARCHAR",
+          "field_type": "char",
+          "nullable": true,
+          "description": "Name of the sale order",
+          "example_values": "S00006, S00007, S00008"
+        },
+        {
+          "name": "order_line",
+          "type": "ONE2MANY",
+          "field_type": "one2many",
+          "related_model": "sale_order_line",
+          "related_field": "order_id",
+          "description": "This field holds the line-level details of the sale order, which are stored in the 'sale_order_line' table and linked through the 'order_id' foreign key.",
+          "example_values": "Can't provide an example since it fetches only the Ids as the values"
+        },
+        {
+          "name": "partner_id",
+          "type": "INTEGER",
+          "field_type": "many2one",
+          "foreign_key": "res_partner.id",
+          "nullable": true,
+          "related_model": "res_partner",
+          "related_field": "id",
+          "description": "This is a foreign key that points to the 'id' column of the res_partner table, allowing us to retrieve the partner's name from that table's column 'name'",
+          "example_values": "1,2,3,...",
+          "more_info": "You can access the name from the related model"
+        },
+        {
+          "name": "team_id",
+          "type": "INTEGER",
+          "field_type": "many2one",
+          "foreign_key": "crm_team.id",
+          "nullable": true,
+          "related_model": "crm_team",
+          "related_field": "id",
+          "description": "This is a foreign key that points to the 'id' column of the crm_team table, from which we can retrieve the sales team's name stored in the 'name' column.",
+          "example_values": "1,2,3,...",
+          "more_info": "You can access the name from the related model"
+        },
+        {
+          "name": "user_id",
+          "type": "INTEGER",
+          "field_type": "many2one",
+          "foreign_key": "res_users.id",
+          "nullable": true,
+          "related_model": "res_users",
+          "related_field": "id",
+          "description": "This is a foreign key that points to the id column of the res_users table. However, to retrieve the salesperson's name, you must follow the 'partner_id' foreign key in res_users, which points to the res_partner table where you can find the column 'name'",
+          "example_values": "1,2,3,...",
+          "more_info": "You can access the name from the related model"
+        },
+        {
+          "name": "amount_tax",
+          "type": "FLOAT",
+          "field_type": "monetary",
+          "nullable": true,
+          "description": "The float field that stores the tax amount of the sale order.",
+          "example_values": "125.0, 500.5, 1200.55,..."
+        },
+        {
+          "name": "amount_total",
+          "type": "FLOAT",
+          "field_type": "monetary",
+          "nullable": true,
+          "description": "The float field that holds the total amount of the sale order including tax.",
+          "example_values": "2000.12, 2500.00, 12000.89,..."
+        },
+        {
+          "name": "amount_untaxed",
+          "type": "FLOAT",
+          "field_type": "monetary",
+          "nullable": true,
+          "description": "This float field stores the sale order's total amount excluding taxes.",
+          "example_values": "1512.00, 2197.87, 108.88,.."
+        }
       ],
+
       "relationships": [
-        {"foreign_key": "partner_id", "references": "res_partner.id"},
-        {"foreign_key": "team_id", "references": "crm_team.id"},
-        {"foreign_key": "user_id", "references": "res_users.id"}
+        {
+          "type": "one_to_many",
+          "related_table": "sale_order_line",
+          "foreign_key_in_related": "order_id",
+          "description": "One sale order can have multiple order lines"
+        },
+        {
+          "type": "many_to_one",
+          "related_table": "res_partner",
+          "foreign_key": "partner_id",
+          "description": "Each order belongs to one customer"
+        },
+        {
+          "type": "many_to_one",
+          "related_table": "crm_team",
+          "foreign_key": "team_id",
+          "description": "Each order belongs to one sales team"
+        },
+        {
+          "type": "many_to_one",
+          "related_table": "res_users",
+          "foreign_key": "user_id",
+          "description": "Each order is handled by one salesperson"
+        }
       ]
     },
+
     {
       "table_name": "sale_order_line",
-      "description": "Order line items with product quantities and pricing",
+      "actual_table_name": "sale_order_line",
+      "display_name": "Sale Order Line",
+      "description": "This table holds the product-level details of the sale order",
+
       "columns": [
-        {"name": "id", "type": "INTEGER", "primary_key": true},
-        {"name": "order_id", "type": "INTEGER", "foreign_key": "sale_order.id"},
-        {"name": "order_partner_id", "type": "INTEGER", "foreign_key": "res_partner.id"},
-        {"name": "product_id", "type": "INTEGER", "foreign_key": "product_product.id"},
-        {"name": "product_uom_qty", "type": "FLOAT", "description": "Quantity ordered"},
-        {"name": "price_unit", "type": "FLOAT", "description": "Unit price"},
-        {"name": "price_subtotal", "type": "FLOAT", "description": "Subtotal before tax"},
-        {"name": "price_tax", "type": "FLOAT", "description": "Tax amount"},
-        {"name": "price_total", "type": "FLOAT", "description": "Total including tax"}
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "field_type": "integer",
+          "primary_key": true,
+          "nullable": false,
+          "description": "Primary Key",
+          "example_values": "1,2,3,..."
+        },
+        {
+          "name": "order_id",
+          "type": "INTEGER",
+          "field_type": "many2one",
+          "foreign_key": "sale_order.id",
+          "nullable": true,
+          "related_model": "sale_order",
+          "related_field": "id",
+          "description": "Foreign key pointing to the sale order.",
+          "example_values": "1, 2, 3,...",
+          "more_info": "You can access the name from the related model"
+        },
+        {
+          "name": "order_partner_id",
+          "type": "INTEGER",
+          "field_type": "many2one",
+          "foreign_key": "res_partner.id",
+          "nullable": true,
+          "related_model": "res_partner",
+          "related_field": "id",
+          "description": "Foreign key pointing to the 'id' column of the res_partner table, where the customer's name is stored in the 'name' column.",
+          "example_values": "1, 2, 3...",
+          "more_info": "You can access the name from the related model"
+        },
+        {
+          "name": "price_subtotal",
+          "type": "FLOAT",
+          "field_type": "monetary",
+          "nullable": true,
+          "description": "A float column that holds the product subtotal before tax.",
+          "example_values": "100.00, 111.55, 250.01, ..."
+        },
+        {
+          "name": "price_tax",
+          "type": "FLOAT",
+          "field_type": "float",
+          "nullable": true,
+          "description": "A float column that hold the tax amount for the ordered product",
+          "example_values": "50.00, 100.98, 200.10, ..."
+        },
+        {
+          "name": "price_total",
+          "type": "FLOAT",
+          "field_type": "monetary",
+          "nullable": true,
+          "description": "A float column that holds the total amount for the product line including taxes",
+          "example_values": "110.01, 200.00, 120.76, ..."
+        },
+        {
+          "name": "price_unit",
+          "type": "FLOAT",
+          "field_type": "float",
+          "nullable": true,
+          "description": "A float column that holds the unit price of one product",
+          "example_values": "10.98, 25.09, 100.11, ..."
+        },
+        {
+          "name": "product_id",
+          "type": "INTEGER",
+          "field_type": "many2one",
+          "foreign_key": "product_product.id",
+          "nullable": true,
+          "related_model": "product_product",
+          "related_field": "id",
+          "description": "Foreign key pointing to the 'id' column of the product_product table. To retrieve the product's name, you must follow its 'product_tmpl_id' column, which links to the 'id' column of the product_template table, where the product name is stored in the 'name' column.",
+          "example_values": "1, 2, 3, ...",
+          "more_info": "You can access the name from the related model"
+        },
+        {
+          "name": "product_uom_qty",
+          "type": "FLOAT",
+          "field_type": "float",
+          "nullable": true,
+          "description": "Total ordered quantity of the product.",
+          "example_values": "10.0, 12.0, 20.0, ..."
+        }
       ],
+
       "relationships": [
-        {"foreign_key": "order_id", "references": "sale_order.id"},
-        {"foreign_key": "order_partner_id", "references": "res_partner.id"},
-        {"foreign_key": "product_id", "references": "product_product.id"}
+        {
+          "type": "many_to_one",
+          "related_table": "sale_order",
+          "foreign_key": "order_id",
+          "description": "Each order line belongs to one sale order"
+        },
+        {
+          "type": "many_to_one",
+          "related_table": "res_partner",
+          "foreign_key": "order_partner_id",
+          "description": "Each order line is associated with one customer"
+        },
+        {
+          "type": "many_to_one",
+          "related_table": "product_product",
+          "foreign_key": "product_id",
+          "description": "Each order line contains one product variant"
+        }
+      ]
+    },
+
+    {
+      "table_name": "res_partner",
+      "actual_table_name": "res_partner",
+      "display_name": "Contact",
+      "description": "This table holds the details of the customer",
+
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "field_type": "integer",
+          "primary_key": true,
+          "nullable": false,
+          "description": "Primary Key",
+          "example_values": "1, 2, 3, ..."
+        },
+        {
+          "name": "name",
+          "type": "VARCHAR",
+          "field_type": "char",
+          "nullable": true,
+          "description": "Name of the customer",
+          "example_values": "Ajay, Anu, Anil, ..."
+        }
+      ],
+
+      "relationships": [
+        {
+          "type": "one_to_many",
+          "related_table": "sale_order",
+          "foreign_key_in_related": "partner_id",
+          "description": "One customer can have multiple sale orders"
+        },
+        {
+          "type": "one_to_many",
+          "related_table": "sale_order_line",
+          "foreign_key_in_related": "order_partner_id",
+          "description": "One customer can have multiple order lines"
+        },
+        {
+          "type": "one_to_many",
+          "related_table": "res_users",
+          "foreign_key_in_related": "partner_id",
+          "description": "One partner can be linked to multiple users (salesperson names)"
+        }
+      ]
+    },
+
+    {
+      "table_name": "crm_team",
+      "actual_table_name": "crm_team",
+      "display_name": "Sales Team",
+      "description": "This table holds the details of the sales team.",
+
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "field_type": "integer",
+          "primary_key": true,
+          "nullable": false,
+          "description": "Primary Key",
+          "example_values": "1,2,3, ..."
+        },
+        {
+          "name": "name",
+          "type": "VARCHAR",
+          "field_type": "char",
+          "nullable": true,
+          "description": "Name of the sales team",
+          "example_values": "Dubai Team, Keral Team, ..."
+        }
+      ],
+
+      "relationships": [
+        {
+          "type": "one_to_many",
+          "related_table": "sale_order",
+          "foreign_key_in_related": "team_id",
+          "description": "One sales team can handle multiple sale orders"
+        }
+      ]
+    },
+
+    {
+      "table_name": "res_users",
+      "actual_table_name": "res_users",
+      "display_name": "User",
+      "description": "This table holds the details of the salesperson/internal users",
+
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "field_type": "integer",
+          "primary_key": true,
+          "nullable": false,
+          "description": "Primary Key",
+          "example_values": "1, 2, 3, ..."
+        },
+        {
+          "name": "partner_id",
+          "type": "INTEGER",
+          "field_type": "many2one",
+          "foreign_key": "res_partner.id",
+          "nullable": true,
+          "related_model": "res_partner",
+          "related_field": "id",
+          "description": "Foreign key pointing to the 'id' column of the res_partner table, where the name of the Customer/Salesperson/Internal User is saved in the column 'name'",
+          "example_values": "1, 2,3 ,...",
+          "more_info": "You can access the name from the related model"
+        }
+      ],
+
+      "relationships": [
+        {
+          "type": "many_to_one",
+          "related_table": "res_partner",
+          "foreign_key": "partner_id",
+          "description": "Each user is linked to one partner (for accessing name)"
+        },
+        {
+          "type": "one_to_many",
+          "related_table": "sale_order",
+          "foreign_key_in_related": "user_id",
+          "description": "One salesperson can handle multiple sale orders"
+        }
+      ]
+    },
+
+    {
+      "table_name": "product_product",
+      "actual_table_name": "product_product",
+      "display_name": "Product Variant",
+      "description": "This table holds the details of the product variants. It is the table used in the sale order line.",
+
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "field_type": "integer",
+          "primary_key": true,
+          "nullable": false,
+          "description": "Primary key",
+          "example_values": "1, 2, 3,..."
+        },
+        {
+          "name": "product_tmpl_id",
+          "type": "INTEGER",
+          "field_type": "many2one",
+          "foreign_key": "product_template.id",
+          "nullable": true,
+          "related_model": "product_template",
+          "related_field": "id",
+          "description": "Foreign key pointing to the 'id' column of the product_template table, where the product's name is stored in the 'name' column.",
+          "example_values": "1, 2, 3, ...",
+          "more_info": "You can access the name from the related model"
+        }
+      ],
+
+      "relationships": [
+        {
+          "type": "many_to_one",
+          "related_table": "product_template",
+          "foreign_key": "product_tmpl_id",
+          "description": "Each product variant belongs to one product template"
+        },
+        {
+          "type": "one_to_many",
+          "related_table": "sale_order_line",
+          "foreign_key_in_related": "product_id",
+          "description": "One product variant can appear in multiple order lines"
+        }
+      ]
+    },
+
+    {
+      "table_name": "product_template",
+      "actual_table_name": "product_template",
+      "display_name": "Product Template",
+      "description": "This table stores the template information for every product created in the system. A single template can have multiple variants, meaning multiple rows in the product_product table may reference the same 'product_tmpl_id'. Every row in product_product table must have a corresponding product_tmpl_id value",
+
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "field_type": "integer",
+          "primary_key": true,
+          "nullable": false,
+          "description": "Primary Key",
+          "example_values": "1, 2, 3, 4..."
+        },
+        {
+          "name": "name",
+          "type": "VARCHAR",
+          "field_type": "char",
+          "nullable": true,
+          "description": "Name of the product",
+          "example_values": "Customizable Table, Office Chair, Storage Box,..."
+        }
+      ],
+
+      "relationships": [
+        {
+          "type": "one_to_many",
+          "related_table": "product_product",
+          "foreign_key_in_related": "product_tmpl_id",
+          "description": "One product template can have multiple product variants"
+        }
       ]
     }
   ],
+
   "table_name_mappings": {
-    "res_partner": "contact",
-    "crm_team": "sales_team",
-    "res_users": "user",
-    "product_product": "product_variant",
     "sale_order": "sale_order",
-    "sale_order_line": "sale_order_line"
+    "sale_order_line": "sale_order_line",
+    "res_partner": "res_partner",
+    "crm_team": "crm_team",
+    "res_users": "res_users",
+    "product_product": "product_product",
+    "product_template": "product_template"
   },
+
   "important_notes": {
-    "TABLE_NAME_MAPPING": "Queries use Odoo table names (res_partner, crm_team, etc.) but database uses simplified names (contact, sales_team, etc.). SQL generation must map these correctly.",
-    "NO_DIRECT_USER_TEAM_LINK": "res_users and crm_team are NOT directly connected. Always use sale_order as bridge.",
-    "PRODUCT_HIERARCHY": "product_product (variants) link to product_template via product_tmpl_id",
-    "correct_joins": {
-      "user_to_team": "FROM res_users u JOIN sale_order so ON u.id = so.user_id JOIN crm_team st ON so.team_id = st.id",
-      "team_to_user": "FROM crm_team st JOIN sale_order so ON st.id = so.team_id JOIN res_users u ON so.user_id = u.id",
-      "product_to_template": "FROM product_product pp JOIN product_template pt ON pp.product_tmpl_id = pt.id"
-    }
+    "NO_TABLE_MAPPING": "All tables use their Odoo model names directly - no renaming needed",
+    "PRODUCT_NAME_ACCESS": "Product name is ONLY in product_template.name. Must JOIN: product_product.product_tmpl_id -> product_template.id -> product_template.name",
+    "USER_NAME_ACCESS": "User name is ONLY in res_partner.name. Must JOIN: res_users.partner_id -> res_partner.id -> res_partner.name",
+    "NO_DIRECT_USER_TEAM": "res_users and crm_team NOT directly connected. Use sale_order as bridge: res_users -> sale_order -> crm_team",
+    "DATE_FORMAT": "date_order is stored as datetime or Excel serial number"
+  },
+
+  "critical_joins": {
+    "get_product_name": "SELECT pt.name FROM product_product pp JOIN product_template pt ON pp.product_tmpl_id = pt.id WHERE pp.id = ?",
+    "get_user_name": "SELECT rp.name FROM res_users ru JOIN res_partner rp ON ru.partner_id = rp.id WHERE ru.id = ?",
+    "get_customer_name": "SELECT name FROM res_partner WHERE id = ?",
+    "get_team_name": "SELECT name FROM crm_team WHERE id = ?",
+    "order_with_product_names": "SELECT sol.*, pt.name as product_name FROM sale_order_line sol JOIN product_product pp ON sol.product_id = pp.id JOIN product_template pt ON pp.product_tmpl_id = pt.id",
+    "order_with_salesperson_name": "SELECT so.*, rp.name as salesperson_name FROM sale_order so JOIN res_users ru ON so.user_id = ru.id JOIN res_partner rp ON ru.partner_id = rp.id"
   }
 }

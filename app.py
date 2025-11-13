@@ -30,13 +30,13 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 
-# Table name mapping from Odoo names to actual database names
+# Table name mapping - No mapping needed, all tables use Odoo names
 TABLE_NAME_MAPPING = {
-    'res_partner': 'contact',
-    'crm_team': 'sales_team',
-    'res_users': 'user',
-    'product_product': 'product_variant',
-    'product_template': 'product_template',  # May not exist in current DB
+    'res_partner': 'res_partner',
+    'crm_team': 'crm_team',
+    'res_users': 'res_users',
+    'product_product': 'product_product',
+    'product_template': 'product_template',
     'sale_order': 'sale_order',
     'sale_order_line': 'sale_order_line'
 }
@@ -802,7 +802,7 @@ def get_stats(conn):
         cursor = conn.cursor()
 
         stats = {}
-        for table in ['contact', 'sales_team', 'user', 'product_variant', 'sale_order', 'sale_order_line']:
+        for table in ['res_partner', 'crm_team', 'res_users', 'product_product', 'sale_order', 'sale_order_line']:
             try:
                 cursor.execute(f"SELECT COUNT(*) FROM {table}")
                 stats[table] = cursor.fetchone()[0]
@@ -847,7 +847,7 @@ def main():
         if conn_stats:
             stats = get_stats(conn_stats)
             if stats:
-                st.metric("Total Customers", f"{stats.get('contact', 0):,}")
+                st.metric("Total Customers", f"{stats.get('res_partner', 0):,}")
                 st.metric("Total Orders", f"{stats.get('sale_order', 0):,}")
                 st.metric("Total Revenue", f"${stats.get('revenue', 0):,.0f}")
 
