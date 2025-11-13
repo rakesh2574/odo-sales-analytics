@@ -851,14 +851,6 @@ def main():
                 st.metric("Total Orders", f"{stats.get('sale_order', 0):,}")
                 st.metric("Total Revenue", f"${stats.get('revenue', 0):,.0f}")
 
-        st.divider()
-        st.header("ℹ️ System Info")
-        st.caption("Table Mapping:")
-        st.caption("• res_partner → contact")
-        st.caption("• crm_team → sales_team")
-        st.caption("• res_users → user")
-        st.caption("• product_product → product_variant")
-
 
     schema = load_schema()
     conn = get_db_connection()
